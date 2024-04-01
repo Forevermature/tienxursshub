@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { serveStatic } from '@hono/node-server/serve-static';
 
 import index from '@/routes/index';
-import robotstxt from '@/routes/robots.txt';
+import robotstxt from '@/routes/robots.txt.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
