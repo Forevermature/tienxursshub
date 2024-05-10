@@ -1,5 +1,5 @@
 import { load } from 'cheerio';
-import got from '@/utils/got';
+import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
 
 export const renderHTML = (node) => {
@@ -60,7 +60,7 @@ export const renderHTML = (node) => {
 };
 
 export const parseItem = async (item) => {
-    const { data: response, url } = await got(item.link);
+    const { _data: response, url } = await ofetch.raw(item.link);
 
     if (new URL(url).hostname !== 'www.scmp.com') {
         // e.g., https://multimedia.scmp.com/
@@ -78,6 +78,10 @@ export const parseItem = async (item) => {
     item.description = renderHTML(article.subHeadline.json) + renderHTML(article.images.find((i) => i.type === 'leading')) + renderHTML(article.body.json);
     item.updated = parseDate(article.updatedDate, 'x');
     item.category = [...new Set([...article.topics.map((t) => t.name), ...article.sections.flatMap((t) => t.value.map((v) => v.name)), ...article.keywords.map((k) => k?.split(', '))])];
+
+    item.enclosure_length = item.enclosure.length;
+    item.enclosure_url = item.enclosure.url;
+    item.enclosure_type = item.enclosure.type;
 
     // N.B. gallery in article is not rendered
     // e.g., { type: 'div', attribs: { class: 'scmp-photo-gallery', 'data-gallery-nid': '3239409' }}
