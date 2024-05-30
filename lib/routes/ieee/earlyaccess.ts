@@ -3,7 +3,7 @@ import { getCurrentPath } from '@/utils/helpers';
 const __dirname = getCurrentPath(import.meta.url);
 
 import cache from '@/utils/cache';
-import got from '@/utils/got';
+import ofetch from '@/utils/ofetch';
 import { load } from 'cheerio';
 import path from 'node:path';
 import { art } from '@/utils/render';
@@ -15,7 +15,7 @@ export const route: Route = {
     path: '/journal/:journal/earlyaccess/:sortType?',
     categories: ['journal'],
     example: '/ieee/journal/5306045/earlyaccess',
-    parameters: { journal: 'Issue code, the number of the `isnumber` in the URL', sortType: 'Sort Type, default: `vol-only-seq`, the part of the URL after `sortType`' },
+    parameters: { journal: 'Issue code, the number of the `isnumber` in the link', sortType: 'Sort Type, default: `vol-only-seq`, the part of the link after `sortType`' },
     features: {
         requireConfig: false,
         requirePuppeteer: false,
@@ -25,37 +25,53 @@ export const route: Route = {
         supportScihub: false,
     },
     name: 'Early Access Journal',
-    maintainers: ['5upernova-heng'],
+    maintainers: ['5upernova-heng', 'Derekmini'],
     handler,
 };
+
+const renderDesc = (item) =>
+    art(path.join(__dirname, 'templates/description.art'), {
+        item,
+    });
 
 async function handler(ctx) {
     const isnumber = ctx.req.param('journal');
     const sortType = ctx.req.param('sortType') ?? 'vol-only-seq';
     const host = 'https://ieeexplore.ieee.org';
-    const jrnlUrl = `${host}/xpl/tocresult.jsp?isnumber=${isnumber}`;
+    const link = `${host}/xpl/tocresult.jsp?isnumber=${isnumber}`;
 
-    const response = await got(`${host}/rest/publication/home/metadata?issueid=${isnumber}`, {
-        cookieJar,
-    }).json();
-    const punumber = response.publicationNumber;
-    const volume = response.currentIssue.volume;
-    const jrnlName = response.displayTitle;
+    const { title, punumber, volume } = await ofetch(`${host}/rest/publication/home/metadata?issueid=${isnumber}`, {
+        parseResponse: JSON.parse,
+        headers: {
+            cookie: cookieJar.getCookieStringSync(host),
+        },
+    }).then((res) => {
+        const title = res.displayTitle;
+        const punumber = res.publicationNumber;
+        const volume = res.currentIssue.volume;
+        return {
+            title,
+            punumber,
+            volume,
+        };
+    });
 
-    const response2 = await got
-        .post(`${host}/rest/search/pub/${punumber}/issue/${isnumber}/toc`, {
-            cookieJar,
-            json: {
-                punumber,
-                isnumber,
-                sortType,
-                rowsPerPage: '100',
-            },
-        })
-        .json();
-    let list = response2.records.map((item) => {
-        const $2 = load(item.articleTitle);
-        const title = $2.text();
+    const response = await ofetch(`${host}/rest/search/pub/${punumber}/issue/${isnumber}/toc`, {
+        method: 'POST',
+        parseResponse: JSON.parse,
+        headers: {
+            cookie: cookieJar.getCookieStringSync(host),
+        },
+        body: {
+            punumber,
+            isnumber,
+            sortType,
+            rowsPerPage: '100',
+        },
+    });
+    let list = response.records.map((item) => {
+        const $ = load(item.articleTitle);
+        const title = $.text();
         const link = item.htmlLink;
         const doi = item.doi;
         let authors = 'Do not have author';
@@ -73,18 +89,18 @@ async function handler(ctx) {
         };
     });
 
-    const renderDesc = (item) =>
-        art(path.join(__dirname, 'templates/description.art'), {
-            item,
-        });
     list = await Promise.all(
-        list.map((item) =>
+        list.map((item: any) =>
             cache.tryGet(item.link, async () => {
                 if (item.abstract !== '') {
-                    const response3 = await got(`${host}${item.link}`);
-                    const { abstract } = JSON.parse(response3.body.match(/metadata=(.*);/)[1]);
-                    const $3 = load(abstract);
-                    item.abstract = $3.text();
+                    const res = await ofetch(`${host}${item.link}`, {
+                        parseResponse: (txt) => txt,
+                    });
+                    const $ = load(res);
+                    const metadataMatch = $.html().match(/metadata=(.*);/);
+                    const metadata = metadataMatch ? JSON.parse(metadataMatch[1]) : null;
+                    const $2 = load(metadata?.abstract || '');
+                    item.abstract = $2.text();
                     item.description = renderDesc(item);
                 }
                 return item;
@@ -93,8 +109,8 @@ async function handler(ctx) {
     );
 
     return {
-        title: jrnlName,
-        link: jrnlUrl,
+        title,
+        link,
         item: list,
     };
 }
